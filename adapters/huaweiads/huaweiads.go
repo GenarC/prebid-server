@@ -757,8 +757,6 @@ func getDeviceID(device *device, openRTBRequest *openrtb2.BidRequest) (err error
 	}
 	// IsTrackingEnabled = 1 - DNT
 
-	device.IsTrackingEnabled = "1"
-
 	if openRTBRequest.Device != nil && openRTBRequest.Device.DNT != nil {
 		if device.Oaid != "" {
 			device.IsTrackingEnabled = strconv.Itoa(1 - int(*openRTBRequest.Device.DNT))
@@ -960,7 +958,6 @@ func (a *adapter) convertHuaweiAdsResp2BidderResp(huaweiAdsResponse *huaweiAdsRe
 			// The bidder has already helped us automatically convert the currency price, here only the CNY price is filled in
 			bid.Price = content.Price
 			log.Printf("-------------openRTB Price" + strconv.FormatFloat(bid.Price, 'E', -1, 64))
-			bid.Price = 10
 			bid.CrID = content.Contentid
 			// All currencies should be the same
 			if content.Cur != "" {
