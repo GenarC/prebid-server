@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -15,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mxmCherry/openrtb/v16/native1"
-	nativeRequests "github.com/mxmCherry/openrtb/v16/native1/request"
-	nativeResponse "github.com/mxmCherry/openrtb/v16/native1/response"
-	"github.com/mxmCherry/openrtb/v16/openrtb2"
+	"github.com/mxmCherry/openrtb/v15/native1"
+	nativeRequests "github.com/mxmCherry/openrtb/v15/native1/request"
+	nativeResponse "github.com/mxmCherry/openrtb/v15/native1/response"
+	"github.com/mxmCherry/openrtb/v15/openrtb2"
 	"github.com/prebid/prebid-server/adapters"
 	"github.com/prebid/prebid-server/config"
 	"github.com/prebid/prebid-server/errortypes"
@@ -26,15 +27,20 @@ import (
 )
 
 const huaweiAdxApiVersion = "3.4"
-const defaultCountryName = "ZA"
+const defaultCountryName = "IT"
 const defaultUnknownNetworkType = 0
 const timeFormat = "2006-01-02 15:04:05.000"
 const defaultTimeZone = "+0200"
 const defaultModelName = "HUAWEI"
-const chineseSiteEndPoint = "https://acd.op.hicloud.com/ppsadx/getResult"
+
+// const chineseSiteEndPoint = "https://acd.op.hicloud.com/ppsadx/getResult"
+// const europeanSiteEndPoint = "https://adx-dre.op.hicloud.com/ppsadx/getResult"
+// const asianSiteEndPoint = "https://adx-dra.op.hicloud.com/ppsadx/getResult"
+// const russianSiteEndPoint = "https://adx-drru.op.hicloud.com/ppsadx/getResult"
+const chineseSiteEndPoint = "https://adx-dre.op.hicloud.com/ppsadx/getResult"
 const europeanSiteEndPoint = "https://adx-dre.op.hicloud.com/ppsadx/getResult"
-const asianSiteEndPoint = "https://adx-dra.op.hicloud.com/ppsadx/getResult"
-const russianSiteEndPoint = "https://adx-drru.op.hicloud.com/ppsadx/getResult"
+const asianSiteEndPoint = "https://adx-dre.op.hicloud.com/ppsadx/getResult"
+const russianSiteEndPoint = "https://adx-dre.op.hicloud.com/ppsadx/getResult"
 
 // creative type
 const (
@@ -257,6 +263,7 @@ type empty struct {
 func (a *adapter) MakeRequests(openRTBRequest *openrtb2.BidRequest,
 	reqInfo *adapters.ExtraRequestInfo) (requestsToBidder []*adapters.RequestData, errs []error) {
 	// the upstream code already confirms that there is a non-zero number of impressions
+	log.Printf("-------------openRTB Request")
 	numRequests := len(openRTBRequest.Imp)
 	var request huaweiAdsRequest
 	var header http.Header
@@ -348,6 +355,7 @@ func (a *adapter) MakeBids(openRTBRequest *openrtb2.BidRequest, requestToBidder 
 		return nil, []error{httpStatusError}
 	}
 
+	fmt.Printf("%+v\n", string(bidderRawResponse.Body))
 	var huaweiAdsResponse huaweiAdsResponse
 	if err := json.Unmarshal(bidderRawResponse.Body, &huaweiAdsResponse); err != nil {
 		return nil, []error{&errortypes.BadServerResponse{
@@ -677,6 +685,8 @@ func getCountryCode(openRTBRequest *openrtb2.BidRequest) string {
 		return convertCountryCode(openRTBRequest.Device.Geo.Country)
 	} else if openRTBRequest.User != nil && openRTBRequest.User.Geo != nil && openRTBRequest.User.Geo.Country != "" {
 		return convertCountryCode(openRTBRequest.User.Geo.Country)
+	} else if openRTBRequest.Device != nil && openRTBRequest.Device.MCCMNC != "" {
+		return getCountryCodeFromMCC(openRTBRequest.Device.MCCMNC)
 	} else {
 		return defaultCountryName
 	}
@@ -701,6 +711,19 @@ func convertCountryCode(country string) (out string) {
 		return country[0:2]
 	}
 
+	return defaultCountryName
+}
+
+func getCountryCodeFromMCC(MCC string) (out string) {
+
+	var countryMcc = strings.Split(MCC, "-")[0]
+
+	intVar, err := strconv.Atoi(countryMcc)
+
+	if result, found := mccList[intVar]; found {
+		return strings.ToUpper(result)
+	}
+	_ = fmt.Sprintf("%v", err)
 	return defaultCountryName
 }
 
@@ -733,6 +756,9 @@ func getDeviceID(device *device, openRTBRequest *openrtb2.BidRequest) (err error
 		device.ClientTime = getClientTime(deviceId.ClientTime[0])
 	}
 	// IsTrackingEnabled = 1 - DNT
+
+	device.IsTrackingEnabled = "1"
+
 	if openRTBRequest.Device != nil && openRTBRequest.Device.DNT != nil {
 		if device.Oaid != "" {
 			device.IsTrackingEnabled = strconv.Itoa(1 - int(*openRTBRequest.Device.DNT))
@@ -741,6 +767,7 @@ func getDeviceID(device *device, openRTBRequest *openrtb2.BidRequest) (err error
 			device.GaidTrackingEnabled = strconv.Itoa(1 - int(*openRTBRequest.Device.DNT))
 		}
 	}
+
 	return nil
 }
 
@@ -803,13 +830,17 @@ func getHuaweiAdsReqGeoInfo(request *huaweiAdsRequest, openRTBRequest *openrtb2.
 
 // getHuaweiAdsReqGeoInfo: get GDPR consent
 func getHuaweiAdsReqConsentInfo(request *huaweiAdsRequest, openRTBRequest *openrtb2.BidRequest) {
+	log.Printf("--------------consentzz--------------")
 	if openRTBRequest.User != nil && openRTBRequest.User.Ext != nil {
 		var extUser openrtb_ext.ExtUser
 		if err := json.Unmarshal(openRTBRequest.User.Ext, &extUser); err != nil {
+
 			fmt.Errorf("failed to parse ExtUser in HuaweiAds GDPR check: %v", err)
 			return
 		}
 		request.Consent = extUser.Consent
+		log.Printf("--------------consent--------------")
+		log.Printf(extUser.Consent)
 	}
 }
 
@@ -878,9 +909,12 @@ func checkHuaweiAdsResponseRetcode(response huaweiAdsResponse) error {
 
 // convertHuaweiAdsResp2BidderResp: convert HuaweiAds' response into bidder's response
 func (a *adapter) convertHuaweiAdsResp2BidderResp(huaweiAdsResponse *huaweiAdsResponse, openRTBRequest *openrtb2.BidRequest) (bidderResponse *adapters.BidderResponse, err error) {
+
+	fmt.Sprintf("Respnse from ADX - %v", huaweiAdsResponse.Multiad)
 	if len(huaweiAdsResponse.Multiad) == 0 {
 		return nil, errors.New("convertHuaweiAdsResp2BidderResp: multiad length is 0, get no ads from huawei side.")
 	}
+
 	bidderResponse = adapters.NewBidderResponseWithBidsCapacity(len(huaweiAdsResponse.Multiad))
 	// Default Currency: CNY
 	bidderResponse.Currency = "CNY"
@@ -925,6 +959,8 @@ func (a *adapter) convertHuaweiAdsResp2BidderResp(huaweiAdsResponse *huaweiAdsRe
 			bid.ImpID = mapSlotid2Imp[ad30.Slotid].ID
 			// The bidder has already helped us automatically convert the currency price, here only the CNY price is filled in
 			bid.Price = content.Price
+			log.Printf("-------------openRTB Price" + strconv.FormatFloat(bid.Price, 'E', -1, 64))
+			bid.Price = 10
 			bid.CrID = content.Contentid
 			// All currencies should be the same
 			if content.Cur != "" {
@@ -1411,3 +1447,19 @@ func getDigestAuthorization(huaweiAdsImpExt *openrtb_ext.ExtImpHuaweiAds, isTest
 		"response=" + computeHmacSha256(nonce+":POST:/ppsadx/getResult", apiKey) + "," +
 		"algorithm=HmacSHA256,usertype=1,keyid=" + huaweiAdsImpExt.KeyId
 }
+
+//362 CW,340 MQ, 340 GP, 362 AN, 425 IL, 647 RE, 310 GU, 311 GU, 376 VI MCC
+// Upper MCC values are ignored because of duplicate values and share the same endpoint
+//Israel and Palestine request ent-point issue must be checked
+var mccList = map[int]string{289: "ge", 412: "af", 276: "al", 603: "dz", 544: "as", 213: "ad", 631: "ao", 365: "ai", 344: "ag", 722: "ar", 283: "am", 363: "aw", 505: "au", 232: "at", 400: "az", 364: "bs", 426: "bh", 470: "bd", 342: "bb",
+	257: "by", 206: "be", 702: "bz", 616: "bj", 350: "bm", 402: "bt", 736: "bo", 362: "bq", 218: "ba", 652: "bw", 724: "br", 348: "vg", 528: "bn", 284: "bg", 613: "bf", 642: "bi", 456: "kh", 624: "cm", 302: "ca", 625: "cv", 346: "ky",
+	623: "cf", 622: "td", 730: "cl", 460: "cn", 732: "co", 654: "km", 629: "cg", 548: "ck", 712: "cr", 219: "hr", 368: "cu", 280: "cy", 230: "cz", 630: "cd", 238: "dk", 638: "dj", 366: "dm", 370: "do", 514: "tl", 740: "ec", 602: "eg",
+	706: "sv", 627: "gq", 657: "er", 248: "ee", 636: "et", 750: "fk", 288: "fo", 542: "fj", 244: "fi", 208: "fr", 340: "gf", 547: "pf", 628: "ga", 607: "gm", 282: "ge", 262: "de", 620: "gh", 266: "gi", 202: "gr", 290: "gl", 352: "gd",
+	704: "gt", 611: "gn", 632: "gw", 738: "gy", 372: "ht", 708: "hn", 454: "hk", 216: "hu", 274: "is", 404: "in", 405: "in", 510: "id", 901: "", 432: "ir", 418: "iq", 272: "ie", 222: "it", 612: "ci", 338: "jm", 440: "jp", 441: "jp",
+	416: "jo", 401: "kz", 639: "ke", 545: "ki", 221: "xk", 419: "kw", 437: "kg", 457: "la", 247: "lv", 415: "lb", 651: "ls", 618: "lr", 606: "ly", 295: "li", 246: "lt", 270: "lu", 455: "mo", 646: "mg", 650: "mw", 502: "my", 472: "mv",
+	610: "ml", 278: "mt", 551: "mh", 609: "mr", 617: "mu", 647: "yt", 334: "mx", 550: "fm", 259: "md", 212: "mc", 428: "mn", 297: "me", 354: "ms", 604: "ma", 643: "mz", 414: "mm", 649: "na", 429: "np", 204: "nl", 546: "nc", 530: "nz",
+	710: "ni", 614: "ne", 621: "ng", 555: "nu", 467: "kp", 294: "mk", 242: "no", 422: "om", 410: "pk", 552: "pw", 425: "ps", 714: "pa", 537: "pg", 744: "py", 716: "pe", 515: "ph", 260: "pl", 268: "pt", 330: "pr", 427: "qa", 226: "ro",
+	250: "ru", 635: "rw", 658: "sh", 356: "kn", 358: "lc", 308: "pm", 360: "vc", 549: "ws", 292: "sm", 626: "st", 420: "sa", 608: "sn", 220: "rs", 633: "sc", 619: "sl", 525: "sg", 231: "sk", 293: "si", 540: "sb", 637: "so", 655: "za",
+	450: "kr", 659: "ss", 214: "es", 413: "lk", 634: "sd", 746: "sr", 653: "sz", 240: "se", 228: "ch", 417: "sy", 466: "tw", 436: "tj", 640: "tz", 520: "th", 615: "tg", 539: "to", 374: "tt", 605: "tn", 286: "tr", 438: "tm", 376: "tc",
+	553: "tv", 641: "ug", 255: "ua", 424: "ae", 431: "ae", 430: "ae", 234: "gb", 235: "gb", 310: "us", 312: "us", 311: "us", 316: "us", 748: "uy", 434: "uz", 541: "vu", 225: "va", 734: "ve", 452: "vn", 543: "wf", 421: "ye", 645: "zm",
+	648: "zw"}
